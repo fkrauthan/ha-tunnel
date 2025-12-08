@@ -1,22 +1,27 @@
 use crate::ServerState;
 use crate::auth::verify_auth_signature;
 use axum::Router;
+use axum::body::Body;
 use axum::extract::{ConnectInfo, State, WebSocketUpgrade};
-use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::http::{Request, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
 use common::now_as_secs;
 use common::tunnel::TunnelMessage;
 use futures_util::{SinkExt, StreamExt};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct ClientConnection {
+    #[allow(dead_code)]
     pub client_id: String,
+    #[allow(dead_code)]
     pub connected_at: u64,
     pub last_ping: u64,
     pub sender: mpsc::Sender<TunnelMessage>,
@@ -27,8 +32,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         // Tunnel endpoint (WebSocket)
         .route("/tunnel", get(handle_tunnel_connection))
         // API endpoints
-        // .route("/api/*path", any(handle_api_request)) TODO implement
-        // .route("/api", any(handle_api_request))
+        .route("/api/alexa/smart_home", post(handle_api_request))
+        .route("/api/google_assistant", post(handle_api_request))
+        .route("/auth/authorize", get(handle_api_request))
+        .route("/auth/token", post(handle_api_request))
         // Health check at root
         .route("/health", get(health_check))
         .layer(TraceLayer::new_for_http())
@@ -66,10 +73,6 @@ async fn handle_tunnel_socket(socket: axum::extract::ws::WebSocket, state: Arc<S
 
     let client_id = match auth_result {
         Ok(Some(Ok(Message::Text(text)))) => {
-            info!(
-                "Client ID: {:?}",
-                serde_json::from_str::<TunnelMessage>(&text)
-            );
             match serde_json::from_str::<TunnelMessage>(&text) {
                 Ok(TunnelMessage::Auth {
                     client_id,
@@ -198,9 +201,10 @@ async fn handle_client_message(state: &Arc<ServerState>, client_id: &str, msg: T
         }
         TunnelMessage::Error { ref request_id, .. } => {
             if let Some(request_id) = &request_id
-                && let Some((_, sender)) = state.pending_requests.remove(request_id) {
-                    let _ = sender.send(msg);
-                }
+                && let Some((_, sender)) = state.pending_requests.remove(request_id)
+            {
+                let _ = sender.send(msg);
+            }
         }
         TunnelMessage::Ping { timestamp } => {
             if let Some(mut client) = state.clients.get_mut(client_id) {
@@ -215,6 +219,148 @@ async fn handle_client_message(state: &Arc<ServerState>, client_id: &str, msg: T
         }
         _ => {
             warn!(client_id = %client_id, "Unexpected message type");
+        }
+    }
+}
+
+async fn handle_api_request(
+    State(state): State<Arc<ServerState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: Request<Body>,
+) -> Response {
+    let method = request.method().to_string();
+    let path = request.uri().path().to_string();
+    let source_ip = addr.ip().to_string();
+
+    debug!(method = %method, path = %path, source_ip = %source_ip, "API request received");
+
+    // Get client wait timeout from config
+    let wait_timeout = Duration::from_secs(state.config.client_timeout);
+
+    // Wait for a client to be available
+    let client = if state.clients.is_empty() {
+        debug!("No clients connected, waiting up to {:?}", wait_timeout);
+
+        let mut rx = state.client_connected_rx.clone();
+        let wait_result = tokio::time::timeout(wait_timeout, async {
+            loop {
+                if !state.clients.is_empty() {
+                    return true;
+                }
+                if rx.changed().await.is_err() {
+                    return false;
+                }
+            }
+        })
+        .await;
+
+        match wait_result {
+            Ok(true) => state.clients.iter().next(),
+            _ => {
+                warn!("No client connected within timeout");
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "No connected clients (timeout waiting for client)",
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        state.clients.iter().next()
+    };
+
+    let client = match client {
+        Some(c) => c,
+        None => {
+            return (StatusCode::SERVICE_UNAVAILABLE, "No connected clients").into_response();
+        }
+    };
+
+    // Extract request details
+    let headers: Vec<(String, String)> = request
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            if name.eq("host") {
+                return None;
+            }
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name.to_string(), v.to_string()))
+        })
+        .collect();
+
+    let query = request.uri().query().map(|s| s.to_string());
+
+    // Read body
+    let body = match axum::body::to_bytes(request.into_body(), 10 * 1024 * 1024).await {
+        Ok(bytes) => {
+            if bytes.is_empty() {
+                None
+            } else {
+                String::from_utf8(bytes.to_vec()).ok()
+            }
+        }
+        Err(_) => None,
+    };
+
+    // Create request ID and oneshot channel for response
+    let request_id = Uuid::new_v4().to_string();
+    let (response_tx, response_rx) = oneshot::channel();
+
+    // Store pending request
+    state
+        .pending_requests
+        .insert(request_id.clone(), response_tx);
+
+    // Send request to client
+    let tunnel_request = TunnelMessage::HttpRequest {
+        request_id: request_id.clone(),
+        method,
+        path,
+        query,
+        headers,
+        body,
+        source_ip: Some(source_ip),
+    };
+
+    if client.sender.send(tunnel_request).await.is_err() {
+        state.pending_requests.remove(&request_id);
+        return (StatusCode::BAD_GATEWAY, "Failed to forward request").into_response();
+    }
+
+    // Wait for response with timeout
+    let timeout = Duration::from_secs(state.config.request_timeout);
+    match tokio::time::timeout(timeout, response_rx).await {
+        Ok(Ok(TunnelMessage::HttpResponse {
+            status,
+            headers,
+            body,
+            ..
+        })) => {
+            let mut response = Response::builder()
+                .status(StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR));
+
+            for (name, value) in headers {
+                if let Ok(header_name) = name.parse::<axum::http::header::HeaderName>() {
+                    response = response.header(header_name, value);
+                }
+            }
+
+            response.body(Body::from(body.unwrap_or_default())).unwrap()
+        }
+        Ok(Ok(TunnelMessage::Error { message, .. })) => {
+            (StatusCode::FORBIDDEN, message).into_response()
+        }
+        Ok(Ok(_)) => (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response").into_response(),
+        Ok(Err(_)) => {
+            state.pending_requests.remove(&request_id);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Response channel closed").into_response()
+        }
+        Err(_) => {
+            state.pending_requests.remove(&request_id);
+            (StatusCode::GATEWAY_TIMEOUT, "Request timeout").into_response()
         }
     }
 }

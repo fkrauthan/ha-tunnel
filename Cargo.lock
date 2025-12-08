@@ -241,6 +241,7 @@ dependencies = [
  "axum",
  "hex",
  "hmac",
+ "log",
  "reqwest",
  "serde",
  "serde_json",
@@ -594,6 +595,7 @@ dependencies = [
  "common",
  "config",
  "futures-util",
+ "reqwest",
  "tokio",
  "tokio-tungstenite",
  "tracing",
@@ -617,6 +619,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

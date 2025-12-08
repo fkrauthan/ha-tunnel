@@ -1,9 +1,12 @@
 use crate::config::parse_config;
+use crate::proxy::handle_request;
 use crate::tunnel_client::connect;
 use anyhow::Result;
 use clap::Parser;
+use common::error::ProxyError;
 use common::now_as_secs;
 use common::tunnel::TunnelMessage;
+use reqwest::Client;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -11,6 +14,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 mod config;
+mod proxy;
 mod tunnel_client;
 
 #[derive(Parser, Debug)]
@@ -36,6 +40,11 @@ async fn main() -> Result<()> {
     let heartbeat_interval = Duration::from_secs(config.heartbeat_interval);
     let client_id = Uuid::new_v4().to_string();
 
+    let client = Client::builder()
+        .timeout(Duration::from_secs(config.ha_timeout))
+        .build()
+        .map_err(|e| ProxyError::Config(e.to_string()))?;
+
     loop {
         info!(url = %config.server, "Connecting to server...");
 
@@ -60,13 +69,14 @@ async fn main() -> Result<()> {
 
                 // Process incoming requests
                 while let Some(msg) = rx.recv().await {
-                    // TODO needs implementation
-                    // let response = proxy.handle_request(msg).await;
-                    //
-                    // if tx.send(response).await.is_err() {
-                    //     error!("Failed to send response, connection may be closed");
-                    //     break;
-                    // }
+                    let response = handle_request(&config, &client, msg).await;
+
+                    if let Some(res) = response
+                        && tx.send(res).await.is_err()
+                    {
+                        error!("Failed to send response, connection may be closed");
+                        break;
+                    }
                 }
 
                 heartbeat_handle.abort();

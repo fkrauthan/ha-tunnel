@@ -23,11 +23,10 @@ pub enum TunnelMessage {
         request_id: String,
         method: String,
         path: String,
+        query: Option<String>,
         headers: Vec<(String, String)>,
         body: Option<String>,
         source_ip: Option<String>,
-        /// Original Authorization header from the external client (if any)
-        auth_header: Option<String>,
     },
 
     /// HTTP response from upstream
