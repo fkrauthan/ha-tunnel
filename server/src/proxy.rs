@@ -1,5 +1,6 @@
 use crate::ServerState;
 use crate::auth::verify_auth_signature;
+use crate::client_ip::extract_client_ip;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, State, WebSocketUpgrade};
@@ -230,9 +231,14 @@ async fn handle_api_request(
 ) -> Response {
     let method = request.method().to_string();
     let path = request.uri().path().to_string();
-    let source_ip = addr.ip().to_string();
+    let source_ip = extract_client_ip(
+        request.headers(),
+        addr,
+        &state.config.proxy_mode,
+        &state.config.trusted_proxies,
+    );
 
-    debug!(method = %method, path = %path, source_ip = %source_ip, "API request received");
+    debug!(method = %method, path = %path, source_ip = %source_ip, direct_ip = %addr.ip(), "API request received");
 
     // Get client wait timeout from config
     let wait_timeout = Duration::from_secs(state.config.client_timeout);
