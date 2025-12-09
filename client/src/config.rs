@@ -34,6 +34,7 @@ pub struct Config {
     pub ha_server: String,
     pub ha_external_url: String,
     pub ha_timeout: u64,
+    pub ha_ignore_ssl: bool,
 
     pub secret: String,
 
@@ -46,6 +47,7 @@ pub async fn parse_config(config_file: PathBuf) -> Result<Config> {
         .set_default("reconnect_interval", 5)?
         .set_default("heartbeat_interval", 30)?
         .set_default("ha_timeout", 10)?
+        .set_default("ha_ignore_ssl", false)?
         .set_default("assistant_alexa", true)?
         .set_default("assistant_google", true)?
         .add_source(config::File::with_name(config_file.to_str().unwrap()).required(false))
@@ -59,12 +61,21 @@ pub async fn parse_config(config_file: PathBuf) -> Result<Config> {
     let heartbeat_interval = settings.get_int("heartbeat_interval")?.try_into()?;
 
     let ha_server_config = settings.get_string("ha_server")?;
-    let ha_server = resolve_ha_server(&ha_server_config).await?;
+    let resolved = resolve_ha_server(&ha_server_config).await?;
+    let ha_server = resolved.url;
 
     let ha_timeout = settings.get_int("ha_timeout")?.try_into()?;
     let ha_external_url = settings
         .get_string("ha_external_url")
         .unwrap_or_else(|_| ha_server.clone());
+
+    // Auto-enable SSL ignore when auto-detecting with SSL, otherwise use config value
+    let ha_ignore_ssl = if ha_server_config == HA_SERVER_DETECT && resolved.uses_ssl {
+        info!("Auto-detected HTTPS server, enabling SSL certificate validation bypass");
+        true
+    } else {
+        settings.get_bool("ha_ignore_ssl")?
+    };
 
     let assistant_alexa = settings.get_bool("assistant_alexa")?;
     let assistant_google = settings.get_bool("assistant_google")?;
@@ -81,6 +92,7 @@ pub async fn parse_config(config_file: PathBuf) -> Result<Config> {
         ha_server,
         ha_external_url,
         ha_timeout,
+        ha_ignore_ssl,
 
         secret,
 
@@ -91,9 +103,18 @@ pub async fn parse_config(config_file: PathBuf) -> Result<Config> {
     })
 }
 
-async fn resolve_ha_server(ha_server_config: &str) -> Result<String> {
+struct ResolvedHaServer {
+    url: String,
+    uses_ssl: bool,
+}
+
+async fn resolve_ha_server(ha_server_config: &str) -> Result<ResolvedHaServer> {
     if ha_server_config != HA_SERVER_DETECT {
-        return Ok(ha_server_config.to_string());
+        let uses_ssl = ha_server_config.starts_with("https://");
+        return Ok(ResolvedHaServer {
+            url: ha_server_config.to_string(),
+            uses_ssl,
+        });
     }
 
     let supervisor_token = std::env::var("SUPERVISOR_TOKEN")
@@ -123,11 +144,8 @@ async fn resolve_ha_server(ha_server_config: &str) -> Result<String> {
         .await
         .context("Failed to parse Supervisor API response")?;
 
-    let scheme = if supervisor_info.data.ssl {
-        "https"
-    } else {
-        "http"
-    };
+    let uses_ssl = supervisor_info.data.ssl;
+    let scheme = if uses_ssl { "https" } else { "http" };
     let ha_server = format!(
         "{}://{}:{}",
         scheme, supervisor_info.data.ip_address, supervisor_info.data.port
@@ -135,5 +153,8 @@ async fn resolve_ha_server(ha_server_config: &str) -> Result<String> {
 
     info!(ha_server = %ha_server, "Detected Home Assistant server");
 
-    Ok(ha_server)
+    Ok(ResolvedHaServer {
+        url: ha_server,
+        uses_ssl,
+    })
 }

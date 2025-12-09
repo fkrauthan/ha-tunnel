@@ -42,6 +42,7 @@ async fn main() -> Result<()> {
 
     let client = Client::builder()
         .timeout(Duration::from_secs(config.ha_timeout))
+        .danger_accept_invalid_certs(config.ha_ignore_ssl)
         .build()
         .map_err(|e| ProxyError::Config(e.to_string()))?;
 
