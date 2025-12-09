@@ -347,7 +347,11 @@ async fn handle_api_request(
         })) => {
             let body_content = body.unwrap_or_default();
             let body_len = body_content.len();
-            debug!(status = status, body_len = body_len, "Building response from tunnel");
+            debug!(
+                status = status,
+                body_len = body_len,
+                "Building response from tunnel"
+            );
 
             let mut response = Response::builder()
                 .status(StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR));
