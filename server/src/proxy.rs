@@ -345,12 +345,16 @@ async fn handle_api_request(
             body,
             ..
         })) => {
+            let body_content = body.unwrap_or_default();
+            let body_len = body_content.len();
+            debug!(status = status, body_len = body_len, "Building response from tunnel");
+
             let mut response = Response::builder()
                 .status(StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR));
 
             for (name, value) in headers {
                 // Skip hop-by-hop headers that shouldn't be forwarded through proxies
-                // Content-Length must be recalculated by Axum based on actual body size
+                // Content-Length will be set explicitly below based on actual body size
                 let name_lower = name.to_lowercase();
                 if matches!(
                     name_lower.as_str(),
@@ -362,6 +366,7 @@ async fn handle_api_request(
                         | "trailers"
                         | "upgrade"
                 ) {
+                    debug!(header = %name, "Skipping hop-by-hop header");
                     continue;
                 }
                 if let Ok(header_name) = name.parse::<axum::http::header::HeaderName>() {
@@ -369,7 +374,11 @@ async fn handle_api_request(
                 }
             }
 
-            response.body(Body::from(body.unwrap_or_default())).unwrap()
+            // Explicitly set Content-Length based on actual body size
+            response = response.header(axum::http::header::CONTENT_LENGTH, body_len);
+
+            debug!(final_body_len = body_len, "Sending response body");
+            response.body(Body::from(body_content)).unwrap()
         }
         Ok(Ok(TunnelMessage::Error { message, .. })) => {
             (StatusCode::FORBIDDEN, message).into_response()
