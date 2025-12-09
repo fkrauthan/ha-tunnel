@@ -1,7 +1,7 @@
 use crate::error::ProxyError;
-use log::debug;
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite::Message;
+use tracing::debug;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -57,13 +57,14 @@ pub enum TunnelMessage {
 impl TunnelMessage {
     pub fn to_ws_message(&self) -> Result<Message, ProxyError> {
         let json = serde_json::to_string(self)?;
+        debug!(json = json, "to_ws_message");
         Ok(Message::text(json))
     }
 
     pub fn from_ws_message(msg: Message) -> Result<Self, ProxyError> {
         match msg {
             Message::Text(text) => {
-                debug!("TunnelMessage::from_ws_message: {}", text);
+                debug!(text = %text, "from_ws_message");
                 serde_json::from_str(&text).map_err(|e| ProxyError::Tunnel(e.to_string()))
             }
             Message::Binary(data) => {

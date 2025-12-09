@@ -247,13 +247,13 @@ dependencies = [
  "axum",
  "hex",
  "hmac",
- "log",
  "reqwest",
  "serde",
  "serde_json",
  "sha2",
  "thiserror",
  "tokio-tungstenite",
+ "tracing",
 ]
 
 [[package]]

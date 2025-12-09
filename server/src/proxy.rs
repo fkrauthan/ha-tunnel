@@ -381,12 +381,17 @@ async fn handle_api_request(
                 }
             }
 
+            state.pending_requests.remove(&request_id);
             (status_code, header_map, body_content).into_response()
         }
         Ok(Ok(TunnelMessage::Error { message, .. })) => {
+            state.pending_requests.remove(&request_id);
             (StatusCode::FORBIDDEN, message).into_response()
         }
-        Ok(Ok(_)) => (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response").into_response(),
+        Ok(Ok(_)) => {
+            state.pending_requests.remove(&request_id);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response").into_response()
+        }
         Ok(Err(_)) => {
             state.pending_requests.remove(&request_id);
             (StatusCode::INTERNAL_SERVER_ERROR, "Response channel closed").into_response()
