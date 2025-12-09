@@ -18,7 +18,9 @@ options:
   ha_timeout: 10
   log_level: "INFO"
 schema:
-  server: match(^wss?://.+)
+  server:
+    - url
+    - match(^wss?://.+)
   secret: password
   ha_external_url: url?
   assistant_alexa: bool
