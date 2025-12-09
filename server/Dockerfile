@@ -18,25 +18,27 @@ RUN apk add --no-cache \
 WORKDIR /build
 
 # Copy manifests first for better caching
-COPY Cargo.toml ./
-# Cargo.lock may not exist yet
-COPY Cargo.loc[k] ./
+COPY Cargo.toml Cargo.loc[k] ./
+COPY common/Cargo.toml ./common/
+COPY client/Cargo.toml ./client/
+COPY server/Cargo.toml ./server/
 
 # Create dummy src to build dependencies (layer caching)
-RUN mkdir -p src/bin && \
-    echo "fn main() {}" > src/bin/server.rs && \
-    echo "fn main() {}" > src/bin/client.rs && \
-    echo "pub fn dummy() {}" > src/lib.rs && \
-    cargo build --release --bin ha-proxy-server 2>/dev/null || true && \
-    rm -rf src
+RUN mkdir -p common/src client/src server/src && \
+    echo "pub fn dummy() {}" > common/src/lib.rs && \
+    echo "fn main() {}" > client/src/main.rs && \
+    echo "fn main() {}" > server/src/main.rs && \
+    cargo build --release --bin ha-tunnel-client 2>/dev/null || true && \
+    rm -rf common/src server/src
 
 # Copy actual source code
-COPY src ./src
+COPY common/src ./common/src
+COPY server/src ./server/src
 
 # Build the real binary
 ENV OPENSSL_STATIC=1
-RUN touch src/lib.rs src/bin/server.rs && \
-    cargo build --release --bin ha-tunnel-server && \
+RUN touch common/src/lib.rs client/src/main.rs && \
+    cargo build --release --package ha-tunnel-server && \
     strip /build/target/release/ha-tunnel-server
 
 # =====================================================

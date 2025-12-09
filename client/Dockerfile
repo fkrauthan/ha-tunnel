@@ -29,7 +29,7 @@ RUN mkdir -p common/src client/src server/src && \
     echo "fn main() {}" > client/src/main.rs && \
     echo "fn main() {}" > server/src/main.rs && \
     cargo build --release --bin ha-tunnel-client 2>/dev/null || true && \
-    rm -rf common/src client/src server/src
+    rm -rf common/src client/src
 
 # Copy actual source code
 COPY common/src ./common/src
@@ -38,7 +38,7 @@ COPY client/src ./client/src
 # Build the real binary
 ENV OPENSSL_STATIC=1
 RUN touch common/src/lib.rs client/src/main.rs && \
-    cargo build --release --bin ha-tunnel-client && \
+    cargo build --release --package ha-tunnel-client && \
     strip /build/target/release/ha-tunnel-client
 
 # =====================================================
