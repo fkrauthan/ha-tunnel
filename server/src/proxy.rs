@@ -349,6 +349,7 @@ async fn handle_api_request(
             debug!(
                 status = status,
                 body_len = body_content.len(),
+                body = %body_content,
                 "Building response from tunnel"
             );
 
