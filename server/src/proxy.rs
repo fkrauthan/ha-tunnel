@@ -349,6 +349,21 @@ async fn handle_api_request(
                 .status(StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR));
 
             for (name, value) in headers {
+                // Skip hop-by-hop headers that shouldn't be forwarded through proxies
+                // Content-Length must be recalculated by Axum based on actual body size
+                let name_lower = name.to_lowercase();
+                if matches!(
+                    name_lower.as_str(),
+                    "content-length"
+                        | "transfer-encoding"
+                        | "connection"
+                        | "keep-alive"
+                        | "te"
+                        | "trailers"
+                        | "upgrade"
+                ) {
+                    continue;
+                }
                 if let Ok(header_name) = name.parse::<axum::http::header::HeaderName>() {
                     response = response.header(header_name, value);
                 }
