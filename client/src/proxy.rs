@@ -49,7 +49,9 @@ async fn proxy_request(
     for (name, value) in headers {
         request = request.header(&name, value);
     }
-    if let Some(ip) = source_ip {
+    if let Some(ip) = source_ip
+        && config.ha_pass_client_ip
+    {
         request = request.header("x-forwarded-for", &ip);
     }
 

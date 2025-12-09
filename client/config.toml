@@ -1,4 +1,4 @@
 server = "ws://127.0.0.1:3000"
 secret = "hello-world"
 
-ha_server = "https://ha-test.requestcatcher.com/test"
+ha_server = "https://ha-test.requestcatcher.com"

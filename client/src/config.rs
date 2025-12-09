@@ -35,6 +35,7 @@ pub struct Config {
     pub ha_external_url: String,
     pub ha_timeout: u64,
     pub ha_ignore_ssl: bool,
+    pub ha_pass_client_ip: bool,
 
     pub secret: String,
 
@@ -48,6 +49,7 @@ pub async fn parse_config(config_file: PathBuf) -> Result<Config> {
         .set_default("heartbeat_interval", 30)?
         .set_default("ha_timeout", 10)?
         .set_default("ha_ignore_ssl", false)?
+        .set_default("ha_pass_client_ip", false)?
         .set_default("assistant_alexa", true)?
         .set_default("assistant_google", true)?
         .add_source(config::File::with_name(config_file.to_str().unwrap()).required(false))
@@ -69,13 +71,13 @@ pub async fn parse_config(config_file: PathBuf) -> Result<Config> {
         .get_string("ha_external_url")
         .unwrap_or_else(|_| ha_server.clone());
 
-    // Auto-enable SSL ignore when auto-detecting with SSL, otherwise use config value
     let ha_ignore_ssl = if ha_server_config == HA_SERVER_DETECT && resolved.uses_ssl {
         info!("Auto-detected HTTPS server, enabling SSL certificate validation bypass");
         true
     } else {
         settings.get_bool("ha_ignore_ssl")?
     };
+    let ha_pass_client_ip = settings.get_bool("ha_pass_client_ip")?;
 
     let assistant_alexa = settings.get_bool("assistant_alexa")?;
     let assistant_google = settings.get_bool("assistant_google")?;
@@ -93,6 +95,7 @@ pub async fn parse_config(config_file: PathBuf) -> Result<Config> {
         ha_external_url,
         ha_timeout,
         ha_ignore_ssl,
+        ha_pass_client_ip,
 
         secret,
 

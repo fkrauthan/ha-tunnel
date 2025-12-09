@@ -15,6 +15,7 @@ export HA_TUNNEL_ASSISTANT_GOOGLE="$(bashio::config 'assistant_google')"
 export HA_TUNNEL_RECONNECT_INTERVAL="$(bashio::config 'reconnect_interval')"
 export HA_TUNNEL_HEARTBEAT_INTERVAL="$(bashio::config 'heartbeat_interval')"
 export HA_TUNNEL_HA_TIMEOUT="$(bashio::config 'ha_timeout')"
+export HA_TUNNEL_HA_PASS_CLIENT_IP="$(bashio::config 'pass_client_ip')"
 export HA_TUNNEL_LOG_LEVEL="$(bashio::config 'log_level')"
 
 # Optional: ha_external_url (only set if not empty)
