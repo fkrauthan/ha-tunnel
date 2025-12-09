@@ -35,7 +35,10 @@ pub fn extract_client_ip(
     let header_value = match headers.get(header_name).and_then(|v| v.to_str().ok()) {
         Some(value) => value,
         None => {
-            debug!(header = header_name, "Proxy header not found, using direct IP");
+            debug!(
+                header = header_name,
+                "Proxy header not found, using direct IP"
+            );
             return direct_ip.to_string();
         }
     };
