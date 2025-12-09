@@ -1,0 +1,7 @@
+image: ghcr.io/fkrauthan/ha-tunnel-addon-{arch}:latest
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base:3.22
+  amd64: ghcr.io/home-assistant/amd64-base:3.22
+squash: false
+args:
+  CLIENT_IMAGE: ghcr.io/fkrauthan/ha-tunnel-client:latest

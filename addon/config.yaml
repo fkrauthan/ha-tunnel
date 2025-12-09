@@ -1,0 +1,34 @@
+name: "HA Tunnel Client"
+description: "Secure WebSocket tunnel to expose Home Assistant to Alexa/Google Assistant"
+version: "0.1.0"
+slug: "ha_tunnel"
+init: false
+arch:
+  - aarch64
+  - amd64
+homeassistant_api: true
+options:
+  server: ""
+  secret: ""
+  ha_server: "http://supervisor/core"
+  ha_external_url: ""
+  assistant_alexa: true
+  assistant_google: true
+  reconnect_interval: 5
+  heartbeat_interval: 30
+  ha_timeout: 10
+  log_level: "INFO"
+schema:
+  server: url
+  secret: password
+  ha_server: url
+  ha_external_url: url?
+  assistant_alexa: bool
+  assistant_google: bool
+  reconnect_interval: int(1,300)
+  heartbeat_interval: int(5,120)
+  ha_timeout: int(1,60)
+  log_level: list(TRACE|DEBUG|INFO|WARN|ERROR)
+startup: application
+stage: stable
+url: "https://github.com/fkrauthan/ha-tunnel"
