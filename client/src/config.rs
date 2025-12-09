@@ -1,7 +1,23 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use config::Config as ConfigParser;
+use serde::Deserialize;
 use std::path::PathBuf;
-use tracing::Level;
+use tracing::{Level, info};
+
+const SUPERVISOR_API_URL: &str = "http://supervisor/core/info";
+const HA_SERVER_DETECT: &str = "DETECT";
+
+#[derive(Debug, Deserialize)]
+struct SupervisorResponse {
+    data: SupervisorCoreInfo,
+}
+
+#[derive(Debug, Deserialize)]
+struct SupervisorCoreInfo {
+    ip_address: String,
+    port: u16,
+    ssl: bool,
+}
 
 pub struct Features {
     pub assistant_alexa: bool,
@@ -24,7 +40,7 @@ pub struct Config {
     pub features: Features,
 }
 
-pub fn parse_config(config_file: PathBuf) -> Result<Config> {
+pub async fn parse_config(config_file: PathBuf) -> Result<Config> {
     let settings = ConfigParser::builder()
         .set_default("log_level", "INFO")?
         .set_default("reconnect_interval", 5)?
@@ -42,7 +58,9 @@ pub fn parse_config(config_file: PathBuf) -> Result<Config> {
     let reconnect_interval = settings.get_int("reconnect_interval")?.try_into()?;
     let heartbeat_interval = settings.get_int("heartbeat_interval")?.try_into()?;
 
-    let ha_server = settings.get_string("ha_server")?;
+    let ha_server_config = settings.get_string("ha_server")?;
+    let ha_server = resolve_ha_server(&ha_server_config).await?;
+
     let ha_timeout = settings.get_int("ha_timeout")?.try_into()?;
     let ha_external_url = settings
         .get_string("ha_external_url")
@@ -71,4 +89,51 @@ pub fn parse_config(config_file: PathBuf) -> Result<Config> {
             assistant_google,
         },
     })
+}
+
+async fn resolve_ha_server(ha_server_config: &str) -> Result<String> {
+    if ha_server_config != HA_SERVER_DETECT {
+        return Ok(ha_server_config.to_string());
+    }
+
+    let supervisor_token = std::env::var("SUPERVISOR_TOKEN")
+        .context("ha_server is set to DETECT but SUPERVISOR_TOKEN environment variable is not set. Are you running as a Home Assistant add-on?")?;
+
+    info!("Detecting Home Assistant server from Supervisor API...");
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(SUPERVISOR_API_URL)
+        .header("Authorization", format!("Bearer {}", supervisor_token))
+        .send()
+        .await
+        .context("Failed to connect to Supervisor API")?;
+
+    let status = response.status();
+    if !status.is_success() {
+        anyhow::bail!(
+            "Supervisor API returned error status: {} - {}",
+            status.as_u16(),
+            response.text().await.unwrap_or_default()
+        );
+    }
+
+    let supervisor_info: SupervisorResponse = response
+        .json()
+        .await
+        .context("Failed to parse Supervisor API response")?;
+
+    let scheme = if supervisor_info.data.ssl {
+        "https"
+    } else {
+        "http"
+    };
+    let ha_server = format!(
+        "{}://{}:{}",
+        scheme, supervisor_info.data.ip_address, supervisor_info.data.port
+    );
+
+    info!(ha_server = %ha_server, "Detected Home Assistant server");
+
+    Ok(ha_server)
 }

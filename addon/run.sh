@@ -9,7 +9,7 @@ CONFIG_PATH=/data/options.json
 # Read configuration from Home Assistant addon options using jq
 export HA_TUNNEL_SERVER="$(bashio::config 'server')"
 export HA_TUNNEL_SECRET="$(bashio::config 'secret')"
-export HA_TUNNEL_HA_SERVER="$(bashio::config 'ha_server')"
+export HA_TUNNEL_HA_SERVER="DETECT"
 export HA_TUNNEL_ASSISTANT_ALEXA="$(bashio::config 'assistant_alexa')"
 export HA_TUNNEL_ASSISTANT_GOOGLE="$(bashio::config 'assistant_google')"
 export HA_TUNNEL_RECONNECT_INTERVAL="$(bashio::config 'reconnect_interval')"
@@ -25,7 +25,6 @@ fi
 
 echo "Starting HA Tunnel Client..."
 echo "Server: ${HA_TUNNEL_SERVER}"
-echo "HA Server: ${HA_TUNNEL_HA_SERVER}"
 echo "Alexa: ${HA_TUNNEL_ASSISTANT_ALEXA}, Google: ${HA_TUNNEL_ASSISTANT_GOOGLE}"
 
 # Run the tunnel client

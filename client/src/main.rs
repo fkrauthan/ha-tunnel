@@ -27,7 +27,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let config = parse_config(args.config)?;
+    let config = parse_config(args.config).await?;
 
     tracing_subscriber::fmt()
         .with_max_level(config.log_level)
