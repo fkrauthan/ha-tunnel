@@ -10,6 +10,7 @@ hassio_api: true
 options:
   server: ""
   secret: ""
+  ha_external_url: ""
   assistant_alexa: true
   assistant_google: true
   reconnect_interval: 5
@@ -20,7 +21,7 @@ options:
 schema:
   server: url
   secret: password
-  ha_external_url: url?
+  ha_external_url: url
   assistant_alexa: bool
   assistant_google: bool
   reconnect_interval: int(1,300)

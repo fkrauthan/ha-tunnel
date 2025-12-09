@@ -1,0 +1,54 @@
+---
+configuration:
+  log_level:
+    name: Log Level
+    description: >-
+      Defines the log level for the app/add-on.
+
+  ha_external_url:
+    name: Home Assistant UI URL
+    description: >-
+      Set this to your domain name or subdomain that you use to
+      access Home Assistant.
+
+  server:
+    name: Tunnel Server
+    description: >-
+      Set this to the URL the tunnel server is using.
+
+  secret:
+    name: Tunnel Secret
+    description: >-
+      Set this to the same secret that is used on the tunnel server.
+
+  assistant_alexa:
+    name: Assistant Alexa
+    description: >-
+      Defines if alexa endpoints are going to be accessible.
+
+  assistant_google:
+    name: Assistant Google
+    description: >-
+      Defines if google assistant endpoints are going to be accessible.
+
+  reconnect_interval:
+    name: Reconnect Interval (s)
+    description: >-
+      Defines the time in seconds the client should wait before re-connecting 
+      to the tunnel server.
+
+  heartbeat_interval:
+    name: Heartbeat Interval (s)
+    description: >-
+      Defines the time in seconds the client should send a heartbeat to the server.
+
+  ha_timeout:
+    name: Home Assistant API Timeout (s)
+    description: >-
+      Defines the timeout in seconds the client max waits when calling the Home Assistant
+      APIs.
+
+  pass_client_ip:
+    name: Pass Client IP
+    description: >-
+      Defines if the Tunnel Client forwards the actual callers IP to Home Assistant.
