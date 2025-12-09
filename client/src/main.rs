@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
         .with_target(false)
         .init();
 
-    info!("Starting Home Assistant Tunnel Client");
+    info!(ha_server = %config.ha_server, ignore_ssl = %config.ha_ignore_ssl, "Starting Home Assistant Tunnel Client");
 
     let reconnect_interval = Duration::from_secs(config.reconnect_interval);
     let heartbeat_interval = Duration::from_secs(config.heartbeat_interval);
@@ -47,8 +47,6 @@ async fn main() -> Result<()> {
         .map_err(|e| ProxyError::Config(e.to_string()))?;
 
     loop {
-        info!(url = %config.server, "Connecting to server...");
-
         match connect(&client_id, &config.server, &config.secret).await {
             Ok((tx, mut rx)) => {
                 info!("Connected to server");

@@ -26,6 +26,22 @@ The easiest way to install the client is as a Home Assistant add-on.
 2. Install the "HA Tunnel Client" add-on
 3. Configure the add-on with your server URL and secret
 4. Start the add-on
+5. Update `configuration.yaml`
+
+**configuration.yaml**
+
+Since Home Assistant blocks requests from proxies/reverse proxies, you need to tell your instance to allow requests from the Cloudflared app (add-on). The app (add-on) runs locally, so HA has to trust the docker network. In order to do so, add the following lines to your /config/configuration.yaml:
+
+**Note:** _There is no need to adapt anything in these lines since the IP range of the docker network is always the same._
+
+```yaml
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 172.30.33.0/24
+```
+
+**If you are using non-standard hosting methods of HA (e.g. Proxmox), you might have to add another IP(range) here. Check your HA logs after attempting to connect to find the correct IP.**
 
 ### Docker
 
@@ -82,10 +98,10 @@ log_level = "INFO"              # TRACE, DEBUG, INFO, WARN, ERROR
 ### Home Assistant Add-on Configuration
 
 ```yaml
-server: "wss://your-server.example.com"  # Server WebSocket URL
+server: "https://your-server.example.com"  # Server WebSocket URL
 secret: "your-secure-secret"              # Must match server secret
-ha_server: "http://supervisor/core"       # Default for add-on
-ha_external_url: "https://your-ha.duckdns.org"  # Your HA external URL
+ha_server: "http://homeassistant:8123"       # Default for add-on
+ha_external_url: "https://your-ha.domain.com"  # Your HA ui URL
 assistant_alexa: true
 assistant_google: true
 ```
@@ -94,7 +110,7 @@ assistant_google: true
 
 ```bash
 docker run -d \
-  -e HA_TUNNEL_SERVER="wss://your-server.example.com" \
+  -e HA_TUNNEL_SERVER="https://your-server.example.com" \
   -e HA_TUNNEL_SECRET="your-secure-secret" \
   -e HA_TUNNEL_HA_SERVER="http://homeassistant:8123" \
   ghcr.io/fkrauthan/ha-tunnel-client:latest
@@ -106,10 +122,10 @@ Create a `config.toml` file or use environment variables (prefixed with `HA_TUNN
 
 ```toml
 # Client config.toml
-server = "wss://your-server.example.com"  # Required: server WebSocket URL
+server = "https://your-server.example.com"  # Required: server WebSocket URL
 secret = "your-secure-secret"              # Required: must match server
 ha_server = "http://localhost:8123"        # Required: local Home Assistant URL
-ha_external_url = "https://your-ha.duckdns.org"  # External URL for OAuth redirects
+ha_external_url = "https://your-ha.domain.com"  # External URL for OAuth redirects
 
 # Optional settings
 assistant_alexa = true      # Enable Alexa integration

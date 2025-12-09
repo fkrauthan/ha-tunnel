@@ -15,12 +15,10 @@ options:
   reconnect_interval: 5
   heartbeat_interval: 30
   ha_timeout: 10
-  pass_client_ip: false
+  pass_client_ip: true
   log_level: "INFO"
 schema:
-  server:
-    - url
-    - match(^wss?://.+)
+  server: url
   secret: password
   ha_external_url: url?
   assistant_alexa: bool

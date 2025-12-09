@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use config::Config as ConfigParser;
 use serde::Deserialize;
 use std::path::PathBuf;
-use tracing::{Level, info};
+use tracing::Level;
 
 const SUPERVISOR_API_URL: &str = "http://supervisor/core/info";
 const HA_SERVER_DETECT: &str = "DETECT";
@@ -59,6 +59,14 @@ pub async fn parse_config(config_file: PathBuf) -> Result<Config> {
     let log_level = settings.get_string("log_level")?.parse()?;
 
     let server = settings.get_string("server")?;
+    let server = if let Some(stripped) = server.strip_prefix("https://") {
+        format!("wss://{}", stripped)
+    } else if let Some(stripped) = server.strip_prefix("http://") {
+        format!("ws://{}", stripped)
+    } else {
+        server
+    };
+
     let reconnect_interval = settings.get_int("reconnect_interval")?.try_into()?;
     let heartbeat_interval = settings.get_int("heartbeat_interval")?.try_into()?;
 
@@ -72,7 +80,6 @@ pub async fn parse_config(config_file: PathBuf) -> Result<Config> {
         .unwrap_or_else(|_| ha_server.clone());
 
     let ha_ignore_ssl = if ha_server_config == HA_SERVER_DETECT && resolved.uses_ssl {
-        info!("Auto-detected HTTPS server, enabling SSL certificate validation bypass");
         true
     } else {
         settings.get_bool("ha_ignore_ssl")?
@@ -123,8 +130,6 @@ async fn resolve_ha_server(ha_server_config: &str) -> Result<ResolvedHaServer> {
     let supervisor_token = std::env::var("SUPERVISOR_TOKEN")
         .context("ha_server is set to DETECT but SUPERVISOR_TOKEN environment variable is not set. Are you running as a Home Assistant add-on?")?;
 
-    info!("Detecting Home Assistant server from Supervisor API...");
-
     let client = reqwest::Client::new();
     let response = client
         .get(SUPERVISOR_API_URL)
@@ -153,8 +158,6 @@ async fn resolve_ha_server(ha_server_config: &str) -> Result<ResolvedHaServer> {
         "{}://{}:{}",
         scheme, supervisor_info.data.ip_address, supervisor_info.data.port
     );
-
-    info!(ha_server = %ha_server, "Detected Home Assistant server");
 
     Ok(ResolvedHaServer {
         url: ha_server,
