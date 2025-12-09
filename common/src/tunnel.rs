@@ -1,4 +1,5 @@
 use crate::error::ProxyError;
+use log::debug;
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite::Message;
 
@@ -62,6 +63,7 @@ impl TunnelMessage {
     pub fn from_ws_message(msg: Message) -> Result<Self, ProxyError> {
         match msg {
             Message::Text(text) => {
+                debug!("TunnelMessage::from_ws_message: {}", text);
                 serde_json::from_str(&text).map_err(|e| ProxyError::Tunnel(e.to_string()))
             }
             Message::Binary(data) => {
