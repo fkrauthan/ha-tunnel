@@ -1,0 +1,46 @@
+# =====================================================
+# Home Assistant Tunnel Server - CI Dockerfile
+# =====================================================
+# This Dockerfile is used by CI to package pre-built binaries.
+# For local builds, use the standard Dockerfile instead.
+
+FROM alpine:3.23
+
+# Declare TARGETARCH to select the correct binary
+ARG TARGETARCH
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    libgcc \
+    tini \
+    wget
+
+# Create non-root user
+RUN addgroup -g 1000 hatunnel && \
+    adduser -u 1000 -G hatunnel -s /bin/sh -D hatunnel
+
+# Copy pre-built binary (selected by architecture)
+COPY binaries/${TARGETARCH}/ha-tunnel-server /usr/local/bin/
+
+# Create config directories
+RUN mkdir -p /config && \
+    chown -R hatunnel:hatunnel /config
+
+WORKDIR /config
+
+# Switch to non-root user
+USER hatunnel
+
+# Expose ports
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
+# Use tini as init system
+ENTRYPOINT ["/sbin/tini", "--"]
+
+# Default command
+CMD ["ha-tunnel-server", "-c", "/config/config.toml"]

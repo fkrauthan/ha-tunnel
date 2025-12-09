@@ -8,12 +8,7 @@ FROM rust:1.91-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
-    musl-dev \
-    openssl-dev \
-    openssl-libs-static \
-    pkgconfig \
-    perl \
-    make
+    musl-dev
 
 WORKDIR /build
 
@@ -36,7 +31,6 @@ COPY common/src ./common/src
 COPY client/src ./client/src
 
 # Build the real binary
-ENV OPENSSL_STATIC=1
 RUN touch common/src/lib.rs client/src/main.rs && \
     cargo build --release --package ha-tunnel-client && \
     strip /build/target/release/ha-tunnel-client

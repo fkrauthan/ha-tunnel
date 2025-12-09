@@ -20,4 +20,4 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 uuid = { version = "1.19.0", features = ["v4"] }
 
-reqwest = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
