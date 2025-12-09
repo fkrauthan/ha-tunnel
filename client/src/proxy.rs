@@ -104,8 +104,9 @@ pub async fn handle_request(
                     headers: vec![(
                         "Location".to_string(),
                         format!(
-                            "{}/auth/authorize?{}",
+                            "{}{}?{}",
                             config.ha_external_url.trim_end_matches('/'),
+                            path,
                             query.unwrap_or("".to_string())
                         ),
                     )],
