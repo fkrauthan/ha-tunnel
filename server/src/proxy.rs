@@ -4,7 +4,7 @@ use crate::client_ip::extract_client_ip;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, State, WebSocketUpgrade};
-use axum::http::{Request, StatusCode};
+use axum::http::{HeaderMap, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use common::now_as_secs;
@@ -346,19 +346,18 @@ async fn handle_api_request(
             ..
         })) => {
             let body_content = body.unwrap_or_default();
-            let body_len = body_content.len();
             debug!(
                 status = status,
-                body_len = body_len,
+                body_len = body_content.len(),
                 "Building response from tunnel"
             );
 
-            let mut response = Response::builder()
-                .status(StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR));
+            let status_code =
+                StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            let mut header_map = HeaderMap::new();
 
             for (name, value) in headers {
                 // Skip hop-by-hop headers that shouldn't be forwarded through proxies
-                // Content-Length will be set explicitly below based on actual body size
                 let name_lower = name.to_lowercase();
                 if matches!(
                     name_lower.as_str(),
@@ -373,16 +372,15 @@ async fn handle_api_request(
                     debug!(header = %name, "Skipping hop-by-hop header");
                     continue;
                 }
-                if let Ok(header_name) = name.parse::<axum::http::header::HeaderName>() {
-                    response = response.header(header_name, value);
+                if let (Ok(header_name), Ok(header_value)) = (
+                    name.parse::<axum::http::header::HeaderName>(),
+                    value.parse::<axum::http::header::HeaderValue>(),
+                ) {
+                    header_map.insert(header_name, header_value);
                 }
             }
 
-            // Explicitly set Content-Length based on actual body size
-            response = response.header(axum::http::header::CONTENT_LENGTH, body_len);
-
-            debug!(final_body_len = body_len, "Sending response body");
-            response.body(Body::from(body_content)).unwrap()
+            (status_code, header_map, body_content).into_response()
         }
         Ok(Ok(TunnelMessage::Error { message, .. })) => {
             (StatusCode::FORBIDDEN, message).into_response()
