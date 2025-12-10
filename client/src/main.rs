@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     // Spawn signal handler
     tokio::spawn(async move {
         let _ = signal::ctrl_c().await;
-        info!("Shutdown signal received");
+        info!("Shutdown signal received, starting graceful shutdown");
         let _ = shutdown_tx.send(true);
     });
 
@@ -87,7 +87,6 @@ async fn main() -> Result<()> {
                 loop {
                     tokio::select! {
                         _ = shutdown_rx.changed() => {
-                            info!("Shutting down client...");
                             heartbeat_handle.abort();
                             break 'main_loop;
                         }
@@ -127,7 +126,6 @@ async fn main() -> Result<()> {
         // Check shutdown before reconnect sleep
         tokio::select! {
             _ = shutdown_rx.changed() => {
-                info!("Shutting down during reconnect wait...");
                 break;
             }
             _ = sleep(reconnect_interval) => {}
