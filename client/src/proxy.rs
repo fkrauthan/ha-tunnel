@@ -2,7 +2,8 @@ use crate::config::{Config, Features};
 use common::error::ProxyError;
 use common::tunnel::TunnelMessage;
 use reqwest::Client;
-use tracing::error;
+use std::time::Instant;
+use tracing::{Instrument, debug, debug_span, error};
 
 fn validate_request(features: &Features, method: &str, path: &str) -> bool {
     (features.assistant_alexa && method == "POST" && path == "/api/alexa/smart_home")
@@ -19,8 +20,8 @@ fn validate_request(features: &Features, method: &str, path: &str) -> bool {
 async fn proxy_request(
     config: &Config,
     client: &Client,
-    method: String,
-    path: String,
+    method: &str,
+    path: &str,
     query: Option<String>,
     headers: Vec<(String, String)>,
     body: Option<Vec<u8>>,
@@ -32,7 +33,7 @@ async fn proxy_request(
         path,
         query.map(|s| format!("?{}", s)).unwrap_or("".to_string())
     );
-    let mut request = match method.as_str() {
+    let mut request = match method {
         "GET" => client.get(&url),
         "POST" => client.post(&url),
         "PUT" => client.put(&url),
@@ -77,6 +78,83 @@ async fn proxy_request(
     Ok((status, response_headers, body))
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn handle_http_request(
+    config: &Config,
+    client: &Client,
+    request_id: String,
+    method: String,
+    path: String,
+    query: Option<String>,
+    headers: Vec<(String, String)>,
+    body: Option<Vec<u8>>,
+    source_ip: Option<String>,
+) -> TunnelMessage {
+    debug!(method = %method, path = %path, query = ?query, source_ip = ?source_ip, "Received request from server");
+
+    if !validate_request(&config.features, &method, &path) {
+        debug!("Request rejected - feature not enabled");
+        TunnelMessage::HttpResponse {
+            request_id,
+            status: 400,
+            headers: vec![],
+            body: Some("Feature not enabled!".bytes().collect()),
+        }
+    } else if method == "GET" && path == "/auth/authorize" {
+        let redirect_url = format!(
+            "{}{}?{}",
+            config.ha_external_url.trim_end_matches('/'),
+            path,
+            query.unwrap_or("".to_string())
+        );
+        debug!("Redirecting auth request to Home Assistant external URL");
+        TunnelMessage::HttpResponse {
+            request_id,
+            status: 307,
+            headers: vec![("Location".to_string(), redirect_url)],
+            body: None,
+        }
+    } else {
+        let start = Instant::now();
+        match proxy_request(
+            config,
+            client,
+            method.as_str(),
+            path.as_str(),
+            query,
+            headers,
+            body,
+            source_ip,
+        )
+        .await
+        {
+            Ok((status, response_headers, response_body)) => {
+                let latency_ms = start.elapsed().as_millis();
+                debug!(
+                    latency_ms = latency_ms,
+                    status = status,
+                    "Received response from Home Assistant"
+                );
+                TunnelMessage::HttpResponse {
+                    request_id,
+                    status,
+                    headers: response_headers,
+                    body: response_body,
+                }
+            }
+            Err(e) => {
+                let latency_ms = start.elapsed().as_millis();
+                error!(latency_ms = latency_ms, error = %e, "Failed to forward request");
+                TunnelMessage::Error {
+                    request_id: Some(request_id),
+                    code: "upstream_error".to_string(),
+                    message: e.to_string(),
+                }
+            }
+        }
+    }
+}
+
 pub async fn handle_request(
     config: &Config,
     client: &Client,
@@ -92,54 +170,14 @@ pub async fn handle_request(
             body,
             source_ip,
         } => {
-            if !validate_request(&config.features, &method, &path) {
-                Some(TunnelMessage::HttpResponse {
-                    request_id,
-                    status: 400,
-                    headers: vec![],
-                    body: Some("Feature not enabled!".bytes().collect()),
-                })
-            } else if method == "GET" && path == "/auth/authorize" {
-                Some(TunnelMessage::HttpResponse {
-                    request_id,
-                    status: 307,
-                    headers: vec![(
-                        "Location".to_string(),
-                        format!(
-                            "{}{}?{}",
-                            config.ha_external_url.trim_end_matches('/'),
-                            path,
-                            query.unwrap_or("".to_string())
-                        ),
-                    )],
-                    body: None,
-                })
-            } else {
-                Some(
-                    match proxy_request(
-                        config, client, method, path, query, headers, body, source_ip,
-                    )
-                    .await
-                    {
-                        Ok((status, response_headers, response_body)) => {
-                            TunnelMessage::HttpResponse {
-                                request_id,
-                                status,
-                                headers: response_headers,
-                                body: response_body,
-                            }
-                        }
-                        Err(e) => {
-                            error!(request_id = %request_id, error = %e, "Failed to forward request");
-                            TunnelMessage::Error {
-                                request_id: Some(request_id),
-                                code: "upstream_error".to_string(),
-                                message: e.to_string(),
-                            }
-                        }
-                    },
+            let span = debug_span!("request", %request_id);
+            Some(
+                handle_http_request(
+                    config, client, request_id, method, path, query, headers, body, source_ip,
                 )
-            }
+                .instrument(span)
+                .await,
+            )
         }
         TunnelMessage::Pong { timestamp: _ } => None,
         _ => {
