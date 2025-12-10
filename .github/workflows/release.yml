@@ -129,6 +129,9 @@ jobs:
   run-ci:
     name: Run CI Build
     needs: create-release-tag
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/ci.yml
     with:
       ref: v${{ inputs.version }}
