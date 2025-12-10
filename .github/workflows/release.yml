@@ -135,6 +135,7 @@ jobs:
       packages: write
     uses: ./.github/workflows/ci.yml
     with:
+      id: 'main'
       ref: ${{ github.ref }}
 
   run-ci-tag:
@@ -145,6 +146,7 @@ jobs:
       packages: write
     uses: ./.github/workflows/ci.yml
     with:
+      id: 'release'
       ref: v${{ inputs.version }}
 
   update-addon-and-release:

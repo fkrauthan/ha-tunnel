@@ -8,6 +8,10 @@ on:
     branches: [main]
   workflow_call:
     inputs:
+      id:
+        description: 'A unique identifier to differenate assets'
+        required: true
+        type: string
       ref:
         description: 'Git ref to build (e.g., v1.0.0)'
         required: true
@@ -114,14 +118,14 @@ jobs:
       - name: Upload server binary
         uses: actions/upload-artifact@v4
         with:
-          name: ha-tunnel-server-${{ matrix.arch }}-${{ inputs.ref || github.ref }}
+          name: ha-tunnel-server-${{ matrix.arch }}-${{ inputs.id }}
           path: target/${{ matrix.target }}/release/ha-tunnel-server
           retention-days: 1
 
       - name: Upload client binary
         uses: actions/upload-artifact@v4
         with:
-          name: ha-tunnel-client-${{ matrix.arch }}-${{ inputs.ref || github.ref }}
+          name: ha-tunnel-client-${{ matrix.arch }}-${{ inputs.id }}
           path: target/${{ matrix.target }}/release/ha-tunnel-client
           retention-days: 1
 
@@ -146,19 +150,19 @@ jobs:
       - name: Download amd64 binary
         uses: actions/download-artifact@v4
         with:
-          name: ha-tunnel-${{ matrix.image }}-amd64-${{ inputs.ref || github.ref }}
+          name: ha-tunnel-${{ matrix.image }}-amd64-${{ inputs.id }}
           path: binaries/amd64
 
       - name: Download arm64 binary
         uses: actions/download-artifact@v4
         with:
-          name: ha-tunnel-${{ matrix.image }}-arm64-${{ inputs.ref || github.ref }}
+          name: ha-tunnel-${{ matrix.image }}-arm64-${{ inputs.id }}
           path: binaries/arm64
 
       - name: Prepare binaries
         run: |
-          mv binaries/amd64/ha-tunnel-${{ matrix.image }}-${{ inputs.ref || github.ref }} binaries/amd64/ha-tunnel-${{ matrix.image }}
-          mv binaries/arm64/ha-tunnel-${{ matrix.image }}-${{ inputs.ref || github.ref }} binaries/arm64/ha-tunnel-${{ matrix.image }}
+          mv binaries/amd64/ha-tunnel-${{ matrix.image }}-${{ inputs.id }} binaries/amd64/ha-tunnel-${{ matrix.image }}
+          mv binaries/arm64/ha-tunnel-${{ matrix.image }}-${{ inputs.id }} binaries/arm64/ha-tunnel-${{ matrix.image }}
           chmod +x binaries/amd64/ha-tunnel-${{ matrix.image }}
           chmod +x binaries/arm64/ha-tunnel-${{ matrix.image }}
 
