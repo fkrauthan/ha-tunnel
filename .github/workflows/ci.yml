@@ -114,14 +114,14 @@ jobs:
       - name: Upload server binary
         uses: actions/upload-artifact@v4
         with:
-          name: ha-tunnel-server-${{ matrix.arch }}
+          name: ha-tunnel-server-${{ matrix.arch }}-${{ inputs.ref || github.ref }}
           path: target/${{ matrix.target }}/release/ha-tunnel-server
           retention-days: 1
 
       - name: Upload client binary
         uses: actions/upload-artifact@v4
         with:
-          name: ha-tunnel-client-${{ matrix.arch }}
+          name: ha-tunnel-client-${{ matrix.arch }}-${{ inputs.ref || github.ref }}
           path: target/${{ matrix.target }}/release/ha-tunnel-client
           retention-days: 1
 
@@ -146,17 +146,19 @@ jobs:
       - name: Download amd64 binary
         uses: actions/download-artifact@v4
         with:
-          name: ha-tunnel-${{ matrix.image }}-amd64
+          name: ha-tunnel-${{ matrix.image }}-amd64-${{ inputs.ref || github.ref }}
           path: binaries/amd64
 
       - name: Download arm64 binary
         uses: actions/download-artifact@v4
         with:
-          name: ha-tunnel-${{ matrix.image }}-arm64
+          name: ha-tunnel-${{ matrix.image }}-arm64-${{ inputs.ref || github.ref }}
           path: binaries/arm64
 
       - name: Prepare binaries
         run: |
+          mv binaries/amd64/ha-tunnel-${{ matrix.image }}-${{ inputs.ref || github.ref }} binaries/amd64/ha-tunnel-${{ matrix.image }}
+          mv binaries/arm64/ha-tunnel-${{ matrix.image }}-${{ inputs.ref || github.ref }} binaries/arm64/ha-tunnel-${{ matrix.image }}
           chmod +x binaries/amd64/ha-tunnel-${{ matrix.image }}
           chmod +x binaries/arm64/ha-tunnel-${{ matrix.image }}
 
