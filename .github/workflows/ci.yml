@@ -161,8 +161,6 @@ jobs:
 
       - name: Prepare binaries
         run: |
-          mv binaries/amd64/ha-tunnel-${{ matrix.image }}-${{ inputs.id }} binaries/amd64/ha-tunnel-${{ matrix.image }}
-          mv binaries/arm64/ha-tunnel-${{ matrix.image }}-${{ inputs.id }} binaries/arm64/ha-tunnel-${{ matrix.image }}
           chmod +x binaries/amd64/ha-tunnel-${{ matrix.image }}
           chmod +x binaries/arm64/ha-tunnel-${{ matrix.image }}
 
