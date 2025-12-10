@@ -12,6 +12,7 @@ use dashmap::DashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::signal;
 use tokio::sync::{oneshot, watch};
 use tracing::info;
 
@@ -32,6 +33,32 @@ struct ServerState {
     client_connected_tx: watch::Sender<usize>,
     /// Notifier for when clients connect (receiver side, clone this to wait)
     client_connected_rx: watch::Receiver<usize>,
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    info!("Shutdown signal received, starting graceful shutdown");
 }
 
 #[tokio::main]
@@ -66,7 +93,10 @@ async fn main() -> Result<()> {
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await?;
+
+    info!("Server shut down gracefully");
 
     Ok(())
 }

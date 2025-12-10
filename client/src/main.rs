@@ -9,6 +9,8 @@ use common::tunnel::TunnelMessage;
 use reqwest::Client;
 use std::path::PathBuf;
 use std::time::Duration;
+use tokio::signal;
+use tokio::sync::watch;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -46,7 +48,22 @@ async fn main() -> Result<()> {
         .build()
         .map_err(|e| ProxyError::Config(e.to_string()))?;
 
-    loop {
+    // Create shutdown channel
+    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+
+    // Spawn signal handler
+    tokio::spawn(async move {
+        let _ = signal::ctrl_c().await;
+        info!("Shutdown signal received");
+        let _ = shutdown_tx.send(true);
+    });
+
+    'main_loop: loop {
+        // Check for shutdown before attempting connection
+        if *shutdown_rx.borrow() {
+            break;
+        }
+
         match connect(&client_id, &config.server, &config.secret).await {
             Ok((tx, mut rx)) => {
                 info!("Connected to server");
@@ -66,15 +83,31 @@ async fn main() -> Result<()> {
                     }
                 });
 
-                // Process incoming requests
-                while let Some(msg) = rx.recv().await {
-                    let response = handle_request(&config, &client, msg).await;
+                // Process incoming requests with shutdown check
+                loop {
+                    tokio::select! {
+                        _ = shutdown_rx.changed() => {
+                            info!("Shutting down client...");
+                            heartbeat_handle.abort();
+                            break 'main_loop;
+                        }
+                        msg = rx.recv() => {
+                            match msg {
+                                Some(msg) => {
+                                    let response = handle_request(&config, &client, msg).await;
 
-                    if let Some(res) = response
-                        && tx.send(res).await.is_err()
-                    {
-                        error!("Failed to send response, connection may be closed");
-                        break;
+                                    if let Some(res) = response
+                                        && tx.send(res).await.is_err()
+                                    {
+                                        error!("Failed to send response, connection may be closed");
+                                        break;
+                                    }
+                                }
+                                None => {
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -90,6 +123,18 @@ async fn main() -> Result<()> {
             "Reconnecting in {} seconds...",
             reconnect_interval.as_secs()
         );
-        sleep(reconnect_interval).await;
+
+        // Check shutdown before reconnect sleep
+        tokio::select! {
+            _ = shutdown_rx.changed() => {
+                info!("Shutting down during reconnect wait...");
+                break;
+            }
+            _ = sleep(reconnect_interval) => {}
+        }
     }
+
+    info!("Client shut down gracefully");
+
+    Ok(())
 }
