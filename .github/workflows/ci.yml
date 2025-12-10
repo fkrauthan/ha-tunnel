@@ -2,10 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [master, main]
+    branches: [main]
     tags: ['v*']
   pull_request:
-    branches: [master, main]
+    branches: [main]
   workflow_call:
     inputs:
       ref:
@@ -186,7 +186,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha,prefix=
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'master') || github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
