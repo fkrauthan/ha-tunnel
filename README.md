@@ -91,20 +91,13 @@ port = 3000                     # Default: 3000
 client_timeout = 10             # Seconds to wait for client connection
 request_timeout = 30            # Seconds to wait for client response
 log_level = "INFO"              # TRACE, DEBUG, INFO, WARN, ERROR
+
+# Proxy settings (for extracting real client IP)
+proxy_mode = "none"             # none, x-forwarded-for, cloudflare, x-real-ip, true-client-ip, forwarded, or custom header name
+trusted_proxies = []            # List of trusted proxy IPs (empty = trust all)
 ```
 
 ## Client Setup
-
-### Home Assistant Add-on Configuration
-
-```yaml
-server: "https://your-server.example.com"  # Server WebSocket URL
-secret: "your-secure-secret"              # Must match server secret
-ha_server: "http://homeassistant:8123"       # Default for add-on
-ha_external_url: "https://your-ha.domain.com"  # Your HA ui URL
-assistant_alexa: true
-assistant_google: true
-```
 
 ### Docker
 
@@ -124,16 +117,18 @@ Create a `config.toml` file or use environment variables (prefixed with `HA_TUNN
 # Client config.toml
 server = "https://your-server.example.com"  # Required: server WebSocket URL
 secret = "your-secure-secret"              # Required: must match server
-ha_server = "http://localhost:8123"        # Required: local Home Assistant URL
+ha_server = "http://localhost:8123"        # Required: local Home Assistant URL (or "DETECT" for add-on)
 ha_external_url = "https://your-ha.domain.com"  # External URL for OAuth redirects
 
 # Optional settings
-assistant_alexa = true      # Enable Alexa integration
-assistant_google = true     # Enable Google Assistant integration
-ha_timeout = 10             # Request timeout to HA (seconds)
-reconnect_interval = 5      # Reconnection delay (1-300 seconds)
-heartbeat_interval = 30     # Heartbeat interval (5-120 seconds)
-log_level = "INFO"
+assistant_alexa = true      # Enable Alexa integration (default: true)
+assistant_google = true     # Enable Google Assistant integration (default: true)
+ha_timeout = 10             # Request timeout to HA in seconds (default: 10)
+ha_ignore_ssl = false       # Ignore SSL certificate errors for HA (default: false, auto-enabled with DETECT)
+ha_pass_client_ip = false   # Pass client IP to HA via X-Forwarded-For header (default: false)
+reconnect_interval = 5      # Reconnection delay in seconds (default: 5)
+heartbeat_interval = 30     # Heartbeat interval in seconds (default: 30)
+log_level = "INFO"          # TRACE, DEBUG, INFO, WARN, ERROR (default: INFO)
 ```
 
 ## Setting Up Alexa/Google Assistant
