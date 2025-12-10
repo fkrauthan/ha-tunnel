@@ -10,6 +10,7 @@ use axum::routing::{get, post};
 use common::now_as_secs;
 use common::tunnel::TunnelMessage;
 use futures_util::{SinkExt, StreamExt};
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,6 +18,9 @@ use tokio::sync::{mpsc, oneshot};
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+
+/// Maximum number of retry attempts when sending a request to a client fails
+const MAX_REQUEST_RETRIES: u32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct ClientConnection {
@@ -224,6 +228,59 @@ async fn handle_client_message(state: &Arc<ServerState>, client_id: &str, msg: T
     }
 }
 
+/// Find a client not in the exclude set
+fn find_client_excluding(
+    state: &Arc<ServerState>,
+    exclude: &HashSet<String>,
+) -> Option<ClientConnection> {
+    state
+        .clients
+        .iter()
+        .find(|entry| !exclude.contains(entry.key()))
+        .map(|entry| entry.value().clone())
+}
+
+/// Get an available client, waiting if necessary
+async fn get_available_client(
+    state: &Arc<ServerState>,
+    wait_timeout: Duration,
+    exclude: &HashSet<String>,
+) -> Option<ClientConnection> {
+    // Try immediately first
+    if let Some(client) = find_client_excluding(state, exclude) {
+        return Some(client);
+    }
+
+    // No clients available, wait for one to connect
+    debug!("No clients connected, waiting up to {:?}", wait_timeout);
+
+    let mut rx = state.client_connected_rx.clone();
+    // Mark current value as seen to avoid missing notifications
+    rx.borrow_and_update();
+
+    let wait_result = tokio::time::timeout(wait_timeout, async {
+        loop {
+            // Check again after each notification
+            if let Some(client) = find_client_excluding(state, exclude) {
+                return Some(client);
+            }
+            // Wait for next change notification
+            if rx.changed().await.is_err() {
+                return None;
+            }
+        }
+    })
+    .await;
+
+    match wait_result {
+        Ok(client) => client,
+        Err(_) => {
+            warn!("No client connected within timeout");
+            None
+        }
+    }
+}
+
 async fn handle_api_request(
     State(state): State<Arc<ServerState>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -240,49 +297,7 @@ async fn handle_api_request(
 
     debug!(method = %method, path = %path, source_ip = %source_ip, direct_ip = %addr.ip(), "API request received");
 
-    // Get client wait timeout from config
-    let wait_timeout = Duration::from_secs(state.config.client_timeout);
-
-    // Wait for a client to be available
-    let client = if state.clients.is_empty() {
-        debug!("No clients connected, waiting up to {:?}", wait_timeout);
-
-        let mut rx = state.client_connected_rx.clone();
-        let wait_result = tokio::time::timeout(wait_timeout, async {
-            loop {
-                if !state.clients.is_empty() {
-                    return true;
-                }
-                if rx.changed().await.is_err() {
-                    return false;
-                }
-            }
-        })
-        .await;
-
-        match wait_result {
-            Ok(true) => state.clients.iter().next(),
-            _ => {
-                warn!("No client connected within timeout");
-                return (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "No connected clients (timeout waiting for client)",
-                )
-                    .into_response();
-            }
-        }
-    } else {
-        state.clients.iter().next()
-    };
-
-    let client = match client {
-        Some(c) => c,
-        None => {
-            return (StatusCode::SERVICE_UNAVAILABLE, "No connected clients").into_response();
-        }
-    };
-
-    // Extract request details
+    // Extract request details once (before retry loop)
     let headers: Vec<(String, String)> = request
         .headers()
         .iter()
@@ -309,85 +324,126 @@ async fn handle_api_request(
         Err(_) => None,
     };
 
-    // Create request ID and oneshot channel for response
-    let request_id = Uuid::new_v4().to_string();
-    let (response_tx, response_rx) = oneshot::channel();
+    // Get timeouts from config
+    let wait_timeout = Duration::from_secs(state.config.client_timeout);
+    let request_timeout = Duration::from_secs(state.config.request_timeout);
 
-    // Store pending request
-    state
-        .pending_requests
-        .insert(request_id.clone(), response_tx);
+    // Track clients we've already tried (for retry logic)
+    let mut tried_clients: HashSet<String> = HashSet::new();
 
-    // Send request to client
-    let tunnel_request = TunnelMessage::HttpRequest {
-        request_id: request_id.clone(),
-        method,
-        path,
-        query,
-        headers,
-        body,
-        source_ip: Some(source_ip),
-    };
-
-    if client.sender.send(tunnel_request).await.is_err() {
-        state.pending_requests.remove(&request_id);
-        return (StatusCode::BAD_GATEWAY, "Failed to forward request").into_response();
-    }
-
-    // Wait for response with timeout
-    let timeout = Duration::from_secs(state.config.request_timeout);
-    match tokio::time::timeout(timeout, response_rx).await {
-        Ok(Ok(TunnelMessage::HttpResponse {
-            status,
-            headers,
-            body,
-            ..
-        })) => {
-            let status_code =
-                StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-            let mut header_map = HeaderMap::new();
-
-            for (name, value) in headers {
-                // Skip hop-by-hop headers that shouldn't be forwarded through proxies
-                let name_lower = name.to_lowercase();
-                if matches!(
-                    name_lower.as_str(),
-                    "transfer-encoding"
-                        | "connection"
-                        | "keep-alive"
-                        | "te"
-                        | "trailers"
-                        | "upgrade"
-                ) {
-                    debug!(header = %name, "Skipping hop-by-hop header");
-                    continue;
-                }
-                if let (Ok(header_name), Ok(header_value)) = (
-                    name.parse::<axum::http::header::HeaderName>(),
-                    value.parse::<axum::http::header::HeaderValue>(),
-                ) {
-                    header_map.insert(header_name, header_value);
-                }
+    // Retry loop: attempt to send to available clients
+    for attempt in 1..=MAX_REQUEST_RETRIES {
+        // Get an available client (waiting if necessary on first attempt)
+        let client = match get_available_client(&state, wait_timeout, &tried_clients).await {
+            Some(c) => c,
+            None => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "No connected clients (timeout waiting for client)",
+                )
+                    .into_response();
             }
+        };
 
+        let client_id = client.client_id.clone();
+        tried_clients.insert(client_id.clone());
+
+        // Create new request_id for each attempt
+        let request_id = Uuid::new_v4().to_string();
+        let (response_tx, response_rx) = oneshot::channel();
+        state
+            .pending_requests
+            .insert(request_id.clone(), response_tx);
+
+        // Build the tunnel request (clone data for this attempt)
+        let tunnel_request = TunnelMessage::HttpRequest {
+            request_id: request_id.clone(),
+            method: method.clone(),
+            path: path.clone(),
+            query: query.clone(),
+            headers: headers.clone(),
+            body: body.clone(),
+            source_ip: Some(source_ip.clone()),
+        };
+
+        // Try to send to client
+        if client.sender.send(tunnel_request).await.is_err() {
             state.pending_requests.remove(&request_id);
-            (status_code, header_map, body.unwrap_or(vec![])).into_response()
+            warn!(
+                client_id = %client_id,
+                attempt = attempt,
+                max_attempts = MAX_REQUEST_RETRIES,
+                "Failed to send to client, retrying with another client..."
+            );
+            continue; // Try next client
         }
-        Ok(Ok(TunnelMessage::Error { message, .. })) => {
-            state.pending_requests.remove(&request_id);
-            (StatusCode::FORBIDDEN, message).into_response()
-        }
-        Ok(Ok(_)) => {
-            state.pending_requests.remove(&request_id);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response").into_response()
-        }
-        Ok(Err(_)) => {
-            state.pending_requests.remove(&request_id);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Response channel closed").into_response()
-        }
-        Err(_) => {
-            state.pending_requests.remove(&request_id);
-            (StatusCode::GATEWAY_TIMEOUT, "Request timeout").into_response()
-        }
+
+        // Wait for response with timeout (no retries for response-phase failures)
+        return match tokio::time::timeout(request_timeout, response_rx).await {
+            Ok(Ok(TunnelMessage::HttpResponse {
+                status,
+                headers: resp_headers,
+                body: resp_body,
+                ..
+            })) => {
+                let status_code =
+                    StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+                let mut header_map = HeaderMap::new();
+
+                for (name, value) in resp_headers {
+                    // Skip hop-by-hop headers that shouldn't be forwarded through proxies
+                    let name_lower = name.to_lowercase();
+                    if matches!(
+                        name_lower.as_str(),
+                        "transfer-encoding"
+                            | "connection"
+                            | "keep-alive"
+                            | "te"
+                            | "trailers"
+                            | "upgrade"
+                    ) {
+                        debug!(header = %name, "Skipping hop-by-hop header");
+                        continue;
+                    }
+                    if let (Ok(header_name), Ok(header_value)) = (
+                        name.parse::<axum::http::header::HeaderName>(),
+                        value.parse::<axum::http::header::HeaderValue>(),
+                    ) {
+                        header_map.insert(header_name, header_value);
+                    }
+                }
+
+                (status_code, header_map, resp_body.unwrap_or_default()).into_response()
+            }
+            Ok(Ok(TunnelMessage::Error { message, .. })) => {
+                // Client returned an error - don't retry, this is intentional
+                (StatusCode::FORBIDDEN, message).into_response()
+            }
+            Ok(Ok(_)) => {
+                state.pending_requests.remove(&request_id);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Unexpected response").into_response()
+            }
+            Ok(Err(_)) => {
+                // Response channel closed - don't retry
+                state.pending_requests.remove(&request_id);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Response channel closed").into_response()
+            }
+            Err(_) => {
+                // Timeout - don't retry
+                state.pending_requests.remove(&request_id);
+                (StatusCode::GATEWAY_TIMEOUT, "Request timeout").into_response()
+            }
+        };
     }
+
+    // All retries exhausted (only reached if all send attempts failed)
+    warn!(
+        attempts = MAX_REQUEST_RETRIES,
+        "Failed to forward request after all retry attempts"
+    );
+    (
+        StatusCode::BAD_GATEWAY,
+        "Failed to forward request after retries",
+    )
+        .into_response()
 }
