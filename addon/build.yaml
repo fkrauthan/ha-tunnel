@@ -4,4 +4,4 @@ build_from:
   amd64: ghcr.io/home-assistant/amd64-base:3.22
 squash: false
 args:
-  CLIENT_IMAGE: ghcr.io/fkrauthan/ha-tunnel-client:latest
+  CLIENT_IMAGE: ghcr.io/fkrauthan/ha-tunnel-client:0.1.0
