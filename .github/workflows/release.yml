@@ -16,23 +16,15 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  create-release-tag:
-    name: Create Release Tag
+  validate-and-prepare:
+    name: Validate and Prepare Release
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     outputs:
       changelog: ${{ steps.changelog.outputs.content }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }}
-
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Validate version format
         run: |
@@ -50,7 +42,6 @@ jobs:
 
       - name: Check CHANGELOG has content in NEXT section
         run: |
-          # Extract content between ## NEXT and the next ## heading (or EOF)
           content=$(sed -n '/^## NEXT$/,/^## /{ /^## /d; p; }' CHANGELOG.md | sed '/^$/d')
           if [ -z "$content" ]; then
             echo "Error: CHANGELOG.md has no content in the NEXT section"
@@ -60,14 +51,53 @@ jobs:
           echo "CHANGELOG content found:"
           echo "$content"
 
+      - name: Extract changelog content
+        id: changelog
+        run: |
+          changelog_content=$(sed -n '/^## NEXT$/,/^## /{ /^## NEXT$/d; /^## /d; p; }' CHANGELOG.md)
+          {
+            echo 'content<<EOF'
+            echo "$changelog_content" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Extract addon changelog entries
+        run: |
+          grep -E '^\* \[(Both|Client)\]' CHANGELOG.md | \
+            sed 's/^\* \[Both\] /- /' | \
+            sed 's/^\* \[Client\] /- /' > /tmp/addon_changelog_entries.md || true
+          echo "Addon changelog entries:"
+          cat /tmp/addon_changelog_entries.md
+
+      - name: Upload changelog artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: changelog-artifacts
+          path: /tmp/addon_changelog_entries.md
+          retention-days: 1
+
+  create-release-tag:
+    name: Create Release Tag
+    runs-on: ubuntu-latest
+    needs: validate-and-prepare
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Update Cargo.toml versions
         run: |
-          # Update client/Cargo.toml
           sed -i 's/^version = ".*"/version = "${{ inputs.version }}"/' client/Cargo.toml
           echo "Updated client/Cargo.toml:"
           grep '^version' client/Cargo.toml
 
-          # Update server/Cargo.toml
           sed -i 's/^version = ".*"/version = "${{ inputs.version }}"/' server/Cargo.toml
           echo "Updated server/Cargo.toml:"
           grep '^version' server/Cargo.toml
@@ -79,36 +109,9 @@ jobs:
         run: cargo check --workspace
 
       - name: Process CHANGELOG.md
-        id: changelog
         run: |
-          # Extract the NEXT section content for release notes
-          # Get content between ## NEXT and the next ## heading (or EOF)
-          changelog_content=$(sed -n '/^## NEXT$/,/^## /{ /^## NEXT$/d; /^## /d; p; }' CHANGELOG.md)
-
-          # Save to file for release notes (trim leading/trailing whitespace)
-          echo "$changelog_content" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' > /tmp/release_notes.md
-
-          # Extract [Both] and [Client] entries for addon changelog (strip prefix, convert * to -)
-          grep -E '^\* \[(Both|Client)\]' CHANGELOG.md | \
-            sed 's/^\* \[Both\] /- /' | \
-            sed 's/^\* \[Client\] /- /' > /tmp/addon_changelog_entries.md || true
-
-          echo "Addon changelog entries:"
-          cat /tmp/addon_changelog_entries.md
-
-          # Store in output for later job
-          {
-            echo 'content<<EOF'
-            cat /tmp/release_notes.md
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-
-          # Update CHANGELOG.md: replace ## NEXT with version and add new NEXT section
           sed -i "s/^## NEXT$/## ${{ inputs.version }}/" CHANGELOG.md
-
-          # Add new NEXT section at the top (after # Changelog)
           sed -i '/^# Changelog$/a\\n## NEXT\n' CHANGELOG.md
-
           echo "Updated CHANGELOG.md:"
           head -20 CHANGELOG.md
 
@@ -123,55 +126,17 @@ jobs:
           git push origin main
           git push origin "v${{ inputs.version }}"
 
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v5
-        with:
-          name: release-artifacts
-          path: |
-            /tmp/release_notes.md
-            /tmp/addon_changelog_entries.md
-          retention-days: 1
-
-  wait-for-ci:
-    name: Wait for CI Build
-    runs-on: ubuntu-latest
+  run-ci:
+    name: Run CI Build
     needs: create-release-tag
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Wait for CI workflow
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Waiting for CI workflow to start for tag v${{ inputs.version }}..."
-
-          # Wait for workflow to start (up to 3 minutes)
-          run_id=""
-          for i in {1..36}; do
-            run_id=$(gh run list --workflow=ci.yml --limit=20 --json headBranch,databaseId,status \
-              -q '.[] | select(.headBranch == "v${{ inputs.version }}") | .databaseId' | head -1)
-            if [ -n "$run_id" ]; then
-              echo "Found CI run: $run_id"
-              break
-            fi
-            echo "Waiting for CI workflow to start... ($i/36)"
-            sleep 5
-          done
-
-          if [ -z "$run_id" ]; then
-            echo "Error: CI workflow did not start within 3 minutes"
-            exit 1
-          fi
-
-          # Wait for workflow to complete
-          echo "Waiting for CI run $run_id to complete..."
-          gh run watch "$run_id" --exit-status
-          echo "CI workflow completed successfully!"
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: v${{ inputs.version }}
 
   update-addon-and-release:
     name: Update Addon & Create Release
     runs-on: ubuntu-latest
-    needs: [create-release-tag, wait-for-ci]
+    needs: [validate-and-prepare, run-ci]
     permissions:
       contents: write
     steps:
@@ -179,7 +144,6 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Configure Git
         run: |
@@ -189,10 +153,10 @@ jobs:
       - name: Pull latest changes
         run: git pull origin main
 
-      - name: Download release artifacts
+      - name: Download changelog artifacts
         uses: actions/download-artifact@v6
         with:
-          name: release-artifacts
+          name: changelog-artifacts
           path: /tmp
 
       - name: Update addon/build.yaml
@@ -214,7 +178,6 @@ jobs:
             echo "Adding entries to addon/CHANGELOG.md:"
             cat /tmp/addon_changelog_entries.md
 
-            # Create a temporary file with the new changelog content
             {
               echo "# Changelog"
               echo ""
@@ -222,7 +185,6 @@ jobs:
               echo ""
               cat /tmp/addon_changelog_entries.md
               echo ""
-              # Append the rest of the existing changelog (skip the # Changelog header)
               tail -n +2 addon/CHANGELOG.md
             } > /tmp/new_addon_changelog.md
 
@@ -244,6 +206,12 @@ jobs:
           fi
           git commit -m "chore: update addon to v${{ inputs.version }}"
           git push origin main
+
+      - name: Create release notes file
+        run: |
+          cat << 'EOF' > /tmp/release_notes.md
+          ${{ needs.validate-and-prepare.outputs.changelog }}
+          EOF
 
       - name: Create GitHub Release
         env:
