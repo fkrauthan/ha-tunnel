@@ -182,13 +182,11 @@ jobs:
             cat /tmp/addon_changelog_entries.md
 
             {
-              echo "# Changelog"
-              echo ""
               echo "## ${{ inputs.version }}"
               echo ""
               cat /tmp/addon_changelog_entries.md
               echo ""
-              tail -n +2 addon/CHANGELOG.md
+              cat addon/CHANGELOG.md
             } > /tmp/new_addon_changelog.md
 
             mv /tmp/new_addon_changelog.md addon/CHANGELOG.md
