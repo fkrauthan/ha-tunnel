@@ -1,7 +1,6 @@
 use crate::error::ProxyError;
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite::Message;
-use tracing::debug;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -26,7 +25,8 @@ pub enum TunnelMessage {
         path: String,
         query: Option<String>,
         headers: Vec<(String, String)>,
-        body: Option<String>,
+        #[serde(with = "base64")]
+        body: Option<Vec<u8>>,
         source_ip: Option<String>,
     },
 
@@ -35,7 +35,8 @@ pub enum TunnelMessage {
         request_id: String,
         status: u16,
         headers: Vec<(String, String)>,
-        body: Option<String>,
+        #[serde(with = "base64")]
+        body: Option<Vec<u8>>,
     },
 
     /// Error response
@@ -57,14 +58,12 @@ pub enum TunnelMessage {
 impl TunnelMessage {
     pub fn to_ws_message(&self) -> Result<Message, ProxyError> {
         let json = serde_json::to_string(self)?;
-        debug!(json = json, "to_ws_message");
         Ok(Message::text(json))
     }
 
     pub fn from_ws_message(msg: Message) -> Result<Self, ProxyError> {
         match msg {
             Message::Text(text) => {
-                debug!(text = %text, "from_ws_message");
                 serde_json::from_str(&text).map_err(|e| ProxyError::Tunnel(e.to_string()))
             }
             Message::Binary(data) => {
@@ -89,4 +88,27 @@ pub fn generate_auth_signature(client_id: &str, timestamp: u64, secret: &str) ->
     mac.update(message.as_bytes());
 
     hex::encode(mac.finalize().into_bytes())
+}
+
+mod base64 {
+    use base64::Engine;
+    use base64::prelude::BASE64_STANDARD;
+    use serde::{Deserialize, Serialize};
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &Option<Vec<u8>>, s: S) -> Result<S::Ok, S::Error> {
+        let base64 = v.as_ref().map(|v| BASE64_STANDARD.encode(v));
+        <Option<String>>::serialize(&base64, s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
+        let base64 = <Option<String>>::deserialize(d)?;
+        match base64 {
+            Some(v) => BASE64_STANDARD
+                .decode(v.as_bytes())
+                .map(Some)
+                .map_err(serde::de::Error::custom),
+            None => Ok(None),
+        }
+    }
 }

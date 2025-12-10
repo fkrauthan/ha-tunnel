@@ -23,9 +23,9 @@ async fn proxy_request(
     path: String,
     query: Option<String>,
     headers: Vec<(String, String)>,
-    body: Option<String>,
+    body: Option<Vec<u8>>,
     source_ip: Option<String>,
-) -> Result<(u16, Vec<(String, String)>, Option<String>), ProxyError> {
+) -> Result<(u16, Vec<(String, String)>, Option<Vec<u8>>), ProxyError> {
     let url = format!(
         "{}{}{}",
         config.ha_server.trim_end_matches('/'),
@@ -56,7 +56,7 @@ async fn proxy_request(
     }
 
     if let Some(body) = body {
-        request = request.body(body.to_string());
+        request = request.body(body);
     }
 
     let response = request.send().await?;
@@ -72,7 +72,7 @@ async fn proxy_request(
         })
         .collect();
 
-    let body = response.text().await.ok();
+    let body = response.bytes().await.ok().map(|body| body.to_vec());
 
     Ok((status, response_headers, body))
 }
@@ -97,7 +97,7 @@ pub async fn handle_request(
                     request_id,
                     status: 400,
                     headers: vec![],
-                    body: Some("Feature not enabled!".to_string()),
+                    body: Some("Feature not enabled!".bytes().collect()),
                 })
             } else if method == "GET" && path == "/auth/authorize" {
                 Some(TunnelMessage::HttpResponse {

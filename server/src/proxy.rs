@@ -298,14 +298,12 @@ async fn handle_api_request(
         .collect();
 
     let query = request.uri().query().map(|s| s.to_string());
-
-    // Read body
     let body = match axum::body::to_bytes(request.into_body(), 10 * 1024 * 1024).await {
         Ok(bytes) => {
             if bytes.is_empty() {
                 None
             } else {
-                String::from_utf8(bytes.to_vec()).ok()
+                Some(bytes.to_vec())
             }
         }
         Err(_) => None,
@@ -345,14 +343,6 @@ async fn handle_api_request(
             body,
             ..
         })) => {
-            let body_content = body.unwrap_or_default();
-            debug!(
-                status = status,
-                body_len = body_content.len(),
-                body = %body_content,
-                "Building response from tunnel"
-            );
-
             let status_code =
                 StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
             let mut header_map = HeaderMap::new();
@@ -362,8 +352,7 @@ async fn handle_api_request(
                 let name_lower = name.to_lowercase();
                 if matches!(
                     name_lower.as_str(),
-                    "content-length"
-                        | "transfer-encoding"
+                    "transfer-encoding"
                         | "connection"
                         | "keep-alive"
                         | "te"
@@ -382,7 +371,7 @@ async fn handle_api_request(
             }
 
             state.pending_requests.remove(&request_id);
-            (status_code, header_map, body_content).into_response()
+            (status_code, header_map, body.unwrap_or(vec![])).into_response()
         }
         Ok(Ok(TunnelMessage::Error { message, .. })) => {
             state.pending_requests.remove(&request_id);
