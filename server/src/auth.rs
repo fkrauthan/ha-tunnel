@@ -7,9 +7,9 @@ pub fn verify_auth_signature(
     signature: &str,
     secret: &str,
 ) -> bool {
-    // Check timestamp is within 5 minute
+    // Check timestamp is within 2 minute
     let now = now_as_secs();
-    if now.abs_diff(timestamp) > 300 {
+    if now.abs_diff(timestamp) > 120 {
         return false;
     }
 
