@@ -22,7 +22,7 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  lint:
+  lint-code:
     name: Lint & Format
     runs-on: ubuntu-latest
     steps:
@@ -52,11 +52,26 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+  lint-addon:
+    name: Build HA Addon
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - name: 🔍 Find add-on directories
+        id: addons
+        uses: home-assistant/actions/helpers/find-addons@master
+      - name: 🚀 Run Home Assistant Add-on Lint
+        uses: frenck/action-addon-linter@v2
+        with:
+          path: "./${{ matrix.path }}"
+
   # Build binaries using cross-compilation (much faster than QEMU)
   build-binaries:
     name: Build Binaries
     runs-on: ubuntu-latest
-    needs: [lint]
+    needs: [lint-code]
     if: github.event_name != 'pull_request'
 
     strategy:
@@ -133,7 +148,7 @@ jobs:
   build-docker:
     name: Build & Push Docker Images
     runs-on: ubuntu-latest
-    needs: [build-binaries]
+    needs: [build-binaries, lint-addon]
     permissions:
       contents: read
       packages: write
