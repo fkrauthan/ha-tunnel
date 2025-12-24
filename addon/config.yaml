@@ -29,6 +29,4 @@ schema:
   ha_timeout: int(1,60)
   pass_client_ip: bool
   log_level: list(TRACE|DEBUG|INFO|WARN|ERROR)
-startup: application
-stage: stable
 url: "https://github.com/fkrauthan/ha-tunnel"
